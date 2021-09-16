@@ -152,7 +152,7 @@ class Lipo(ConanVariantsMiddleware):
     def xcode_copy(copy, *args, excludes=(), **kw):
         # Some packages (libpng) use cmake but package with self.copy("*")
         # so make sure that we don't find the single arch files.
-        copy(*args, excludes=excludes + ["*Objects-normal"], **kw)
+        copy(*args, excludes=list(excludes) + ["*Objects-normal"], **kw)
 
     def package(self):
         with patch_arguments(self.get_conanfile(), "copy", self.xcode_copy):
