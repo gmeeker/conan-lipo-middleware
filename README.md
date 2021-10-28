@@ -13,7 +13,7 @@ This was discussed in this GitHub issue:
 
 ## Conan requirements
 
-This requires the proposed Conan middleware support, in the *middleware* branch:
+This requires the Conan proposals for middleware and variants.  These are in the default branch here:
 <https://github.com/gmeeker/conan>
 
 ## Installation
@@ -22,9 +22,39 @@ Install the Lipo class:
 
 ``$ conan create .``
 
-Install the package to use *multiarch*, or derive your own and pass additional settings to each variant (e.g. different SDKs for iOS).
+Install the package to use *multiarch*, or derive your own and pass additional settings to each variant (e.g. different SDKs for iOS). (No longer works.)
 
 ``$ cd multiarch && conan create .``
+
+## pyreq (no middleware)
+
+Install the Lipo class:
+
+``$ cd pyreq && conan create .``
+
+```
+class ExampleLipo(ConanFile):
+    name = "lipo_example"
+    version = "1.0"
+    settings = "arch", "os"
+    python_requires = "lipo-pyreq/0.1@"
+    python_requires_extend = "lipo-pyreq.lipo"
+
+    def configure(self):
+        """ usual configure here """
+        # self.set_variants("x86_64 armv8")
+        # self.set_variants(self.settings.multiarch)
+        self.set_variants([
+            {"arch": "x86_64", "os.version": "10.13", "display_name": "Intel", "folder": "x86_64"},
+            {"arch": "armv8", "os.version": "11.0", "display_name": "M1", "folder": "armv8"},
+        ])
+
+    def build_variant(self):
+        print("build", self.settings.arch)
+
+    def package_variant(self):
+        print("package", self.settings.arch)
+```
 
 ### Settings
 
@@ -44,8 +74,10 @@ compiler.libcxx=libc++
 build_type=Release
 compiler.cppstd=11
 [options]
-[build_requires]
-lipo-multiarch-middleware/0.1@
+[middleware_requires]
+lipo-middleware/0.1@
+[middleware]
+lipo
 [env]
 ```
 

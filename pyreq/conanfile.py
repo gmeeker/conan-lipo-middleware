@@ -3,7 +3,6 @@ import shutil
 
 from conans import ConanFile, Variants, tools
 from conans.errors import ConanException
-from conans.model import Middleware
 from conans.model.conan_file import get_env_context_manager
 from conans.client.tools.apple import is_apple_os
 from conans.client.build.cmake_flags import get_generator
@@ -105,77 +104,77 @@ class patch_arguments:
     def __exit__(self, exc_type, exc_val, exc_tb):
         setattr(self._target, self._name, self._original)
 
-class lipo(Middleware):
-    settings = "os", "multiarch"
+class lipo(Variants):
+    def conanfile(self):
+        c = super(lipo, self)
+        assert hasattr(c, "build"), c
+        return c
 
-    def should_apply(self, base):
-        if not Middleware.is_binary(base):
-            return False
-        if not is_apple_os(self.settings.os):
-            return True
-        if "multiarch" in (base.settings or ()):
-            # Recipe handles this itself
-            return False
-        return self.settings.multiarch and len(str(self.settings.multiarch).split()) > 1
+    """ If the user is using Xcode, we assume they are using a custom toolchain for multiarch. """
+    def is_xcode(self):
+        if "cmake" in self.generators:
+            with get_env_context_manager(self):
+                if get_generator(self) == "Xcode":
+                    return True
+        return False
 
-    def __call__(self, base):
-        class LipoConan(Variants, base):
-            settings = Middleware.extend(base.settings, lipo.settings)
+    def is_universal(self):
+        # Recipe handles this itself
+        return self.is_xcode() or "multiarch" in (base.settings or ())
 
-            """ If the user is using Xcode, we assume they are using a custom toolchain for multiarch. """
-            def is_xcode(self):
-                if "cmake" in self.generators:
-                    with get_env_context_manager(self):
-                        if get_generator(self) == "Xcode":
-                            return True
+    def is_binary(self):
+        conanfile = self.conanfile()
+        try:
+            if conanfile.options.header_only:
+                # Header only
                 return False
+        except ConanException:
+            pass
+        try:
+            conanfile.settings.arch
+            conanfile.settings.os
+        except ConanException:
+            # arch or os is not required
+            return False
+        return is_apple_os(self.settings.os)
 
-            def is_universal(self):
-                # Recipe handles this itself
-                return self.is_xcode() or "multiarch" in (base.settings or ())
+    def variants(self):
+        if not self.is_binary():
+            return None
+        if self.is_universal():
+            return None
+        return super().variants()
 
-            def is_binary(self):
-                return Middleware.is_binary(self) and is_apple_os(self.settings.os)
+    @staticmethod
+    def xcode_copy(copy, *args, excludes=(), **kw):
+        # Some packages (libpng) use cmake but package with self.copy("*")
+        # so make sure that we don't find the single arch files.
+        copy(*args, excludes=list(excludes) + ["*Objects-normal"], **kw)
 
-            def variants(self):
-                if not self.is_binary():
-                    return None
-                if self.is_universal():
-                    return None
-                return super().variants()
+    def configure(self):
+        super().configure()
+        self.set_variants(self.settings.multiarch)
 
-            @staticmethod
-            def xcode_copy(copy, *args, excludes=(), **kw):
-                # Some packages (libpng) use cmake but package with self.copy("*")
-                # so make sure that we don't find the single arch files.
-                copy(*args, excludes=list(excludes) + ["*Objects-normal"], **kw)
+    def package(self):
+        with patch_arguments(self, "copy", self.xcode_copy):
+            if self.is_binary() and self.is_universal():
+                return super().package()
+            self.package_variants()
+        variants = self.variants()
+        if not variants:
+            return
+        package_folder = self.package_folder
+        variant_folders = [self.get_variant_basename(v) for v in variants]
+        for v in variants:
+            graft_tree(self.get_variant_folder(package_folder, v),
+                       package_folder,
+                       symlinks=True,
+                       copy_function=lambda s, d: copy_variant_file(self, s, d,
+                                                                    top=package_folder,
+                                                                    variants=variant_folders),
+                       dirs_exist_ok=True)
+        shutil.rmtree(os.path.join(package_folder, self.variants_folder))
 
-            def configure(self):
-                super().configure()
-                self.set_variants(self.settings.multiarch)
-
-            def package(self):
-                with patch_arguments(self, "copy", self.xcode_copy):
-                    if self.is_binary() and self.is_universal():
-                        return super().package()
-                    self.package_variants()
-                variants = self.variants()
-                if not variants:
-                    return
-                package_folder = self.package_folder
-                variant_folders = [self.get_variant_basename(v) for v in variants]
-                for v in variants:
-                    graft_tree(self.get_variant_folder(package_folder, v),
-                               package_folder,
-                               symlinks=True,
-                               copy_function=lambda s, d: copy_variant_file(self, s, d,
-                                                                            top=package_folder,
-                                                                            variants=variant_folders),
-                               dirs_exist_ok=True)
-                shutil.rmtree(os.path.join(package_folder, self.variants_folder))
-
-        return LipoConan
-
-class LipoMiddleware(ConanFile):
-    name = "lipo-middleware"
+class LipoPyreq(ConanFile):
+    name = "lipo-pyreq"
     version = "0.1"
